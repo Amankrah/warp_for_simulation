@@ -3,6 +3,11 @@ Live Real-Time Spray Drift Visualization
 
 Shows droplets falling and drifting in real-time 3D animation using PyVista.
 Press 'q' to quit the animation.
+
+Usage:
+    python live_spray_visualization.py              # Live view only
+    python live_spray_visualization.py --save       # Save video to output/spray_animation.mp4
+    python live_spray_visualization.py --save --output myvideo.mp4
 """
 
 import sys
@@ -13,15 +18,32 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import time
+import argparse
 import pyvista as pv
 from agridrift import SprayConfig, WindConfig, SimulationConfig, DropletSimulator
 
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Live spray drift visualization with optional video recording')
+    parser.add_argument('--save', action='store_true', help='Save animation as video file')
+    parser.add_argument('--output', type=str, default='output/spray_animation.mp4',
+                        help='Output video filename (default: output/spray_animation.mp4)')
+    parser.add_argument('--fps', type=int, default=10,
+                        help='Target frames per second for video (default: 10)')
+    args = parser.parse_args()
+
     print("=" * 60)
     print("AGRIDRIFT - Live Spray Drift Visualization")
     print("=" * 60)
     print()
+
+    if args.save:
+        print("VIDEO RECORDING MODE")
+        print(f"  Output file: {args.output}")
+        print(f"  Target FPS: {args.fps}")
+        print()
+
     print("Controls:")
     print("  - Rotate: Left mouse button + drag")
     print("  - Zoom: Mouse wheel")
@@ -75,8 +97,15 @@ def main():
     print(f"Initialized {simulator.num_droplets} droplets")
     print()
 
+    # Setup output directory if saving
+    if args.save:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Video will be saved to: {output_path.absolute()}")
+        print()
+
     # Setup PyVista plotter for live rendering
-    plotter = pv.Plotter(window_size=(1400, 900))
+    plotter = pv.Plotter(window_size=(1400, 900), off_screen=args.save)
     plotter.set_background('lightblue')
 
     # Add ground
@@ -143,11 +172,18 @@ def main():
     frame_count = 0
     start_time = time.time()
 
-    print("Starting live visualization...")
-    print("(Close window or press 'q' to stop)\n")
+    # Video recording setup
+    if args.save:
+        plotter.open_movie(str(args.output), framerate=args.fps, quality=9)
+        print(f"Recording started...")
+        print(f"Capturing frames at {args.fps} FPS\n")
+    else:
+        print("Starting live visualization...")
+        print("(Close window or press 'q' to stop)\n")
 
-    # Show initial frame
-    plotter.show(interactive_update=True, auto_close=False)
+    # Show initial frame (only if not saving)
+    if not args.save:
+        plotter.show(interactive_update=True, auto_close=False)
 
     try:
         # Animation loop
@@ -230,31 +266,59 @@ def main():
                     )
 
             # Update display
-            plotter.update()
+            if args.save:
+                # Write frame to video
+                plotter.write_frame()
+            else:
+                # Update live display
+                plotter.update()
 
             frame_count += 1
 
             # Print progress
             if frame_count % 10 == 0:
-                print(f"  t={sim_time:.1f}s | Active: {n_active} | FPS: {frame_count/(elapsed+0.001):.1f}")
+                if args.save:
+                    print(f"  t={sim_time:.1f}s | Active: {n_active} | Frames: {frame_count}")
+                else:
+                    print(f"  t={sim_time:.1f}s | Active: {n_active} | FPS: {frame_count/(elapsed+0.001):.1f}")
 
         # Final statistics
         elapsed = time.time() - start_time
         print(f"\nSimulation complete!")
         print(f"Total frames rendered: {frame_count}")
-        print(f"Average FPS: {frame_count/elapsed:.1f}")
-        print(f"Total time: {elapsed:.1f}s")
 
-        # Keep window open to view final result
-        print("\nFinal view displayed. Close window to exit.")
-        plotter.show()
+        if args.save:
+            print(f"Video recording time: {elapsed:.1f}s")
+            print(f"Video duration: {frame_count / args.fps:.1f}s")
+        else:
+            print(f"Average FPS: {frame_count/elapsed:.1f}")
+            print(f"Total time: {elapsed:.1f}s")
+
+        # Finalize video or show final frame
+        if args.save:
+            print("\nFinalizing video file...")
+            plotter.close()
+            print(f"Video saved successfully to: {Path(args.output).absolute()}")
+
+            # Show file size
+            video_size_mb = Path(args.output).stat().st_size / (1024 * 1024)
+            print(f"File size: {video_size_mb:.2f} MB")
+        else:
+            # Keep window open to view final result
+            print("\nFinal view displayed. Close window to exit.")
+            plotter.show()
+            plotter.close()
 
     except KeyboardInterrupt:
         print("\nVisualization interrupted by user")
+        if args.save:
+            print("Closing video file...")
+            plotter.close()
     finally:
-        plotter.close()
+        if not args.save:
+            plotter.close()
 
-    print("\nVisualization closed.")
+    print("\nDone!")
 
 
 if __name__ == "__main__":
