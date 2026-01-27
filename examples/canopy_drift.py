@@ -157,7 +157,7 @@ def main():
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
     axes = axes.flatten()
 
-    for idx, (name, final_state, _, _, dep_mask, _) in enumerate(results):
+    for idx, (name, final_state, _, _, dep_mask, _, _) in enumerate(results):
         ax = axes[idx]
 
         if np.any(dep_mask):
