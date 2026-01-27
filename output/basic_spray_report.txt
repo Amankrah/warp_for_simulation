@@ -1,0 +1,33 @@
+============================================================
+AGRIDRIFT SIMULATION REPORT
+============================================================
+
+DEPOSITION STATISTICS
+------------------------------------------------------------
+Total droplets simulated: 5000
+Droplets deposited: 4912
+Deposition fraction: 98.24%
+Mean drift distance: 12.51 m
+Max drift distance: 4299.76 m
+Std drift distance: 117.92 m
+Deposited mass: 0.05 g
+Deposited AI: 0.00 g
+
+LOSS STATISTICS
+------------------------------------------------------------
+Lost to drift (out of domain): 88 (1.76%)
+Evaporated: 0 (0.00%)
+Still airborne: 0 (0.00%)
+
+COVERAGE EFFICIENCY
+------------------------------------------------------------
+Droplets in target area: 4473
+Droplets outside target: 439
+Target efficiency: 91.06%
+
+DROPLET CHARACTERISTICS
+------------------------------------------------------------
+Mean deposited diameter: 245.1 μm
+Std deposited diameter: 79.9 μm
+
+============================================================
