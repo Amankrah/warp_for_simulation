@@ -2,7 +2,28 @@
 Air Classifier Simulator
 
 Main simulator for protein/starch separation in air classifier.
-Brings together geometry, physics, and particle properties.
+
+DESIGN PHILOSOPHY:
+==================
+This simulator ORCHESTRATES the separation process. It does NOT contain physics!
+
+RESPONSIBILITIES:
+1. Build machine geometry (chamber, selector, etc.)
+2. Initialize feed material (particles with properties)
+3. Call physics modules to compute forces and motion
+4. Track results and analyze separation performance
+
+WHAT IT DOES NOT DO:
+- Does NOT contain physics equations (those are in physics/)
+- Does NOT tune parameters (those are in control_parameters.py)
+- Does NOT define material properties (those are in particle_properties.py)
+
+STRUCTURE:
+- Geometry: Machine structure (from geometry/)
+- Physics: Fundamental equations (from physics/)
+- Control: Machine settings (from physics/control_parameters.py)
+- Materials: Feed properties (from particle_properties.py)
+- Simulator: This file - just coordinates everything!
 """
 
 import numpy as np
@@ -11,9 +32,12 @@ from pathlib import Path
 from typing import Optional, Dict, Tuple
 from dataclasses import dataclass
 
+# Geometry (machine structure)
 from air_classifier.geometry.corrected_config import create_default_config, CorrectedClassifierConfig
 from air_classifier.geometry.assembly import build_complete_classifier, GeometryAssembly
 from air_classifier.warp_integration import create_boundary_meshes, create_boundary_conditions
+
+# Material properties (feed characteristics)
 from air_classifier.particle_properties import (
     create_particle_mixture,
     PROTEIN_PROPERTIES,
@@ -21,9 +45,14 @@ from air_classifier.particle_properties import (
     YELLOW_PEA_FLOUR,
     STANDARD_AIR
 )
+
+# Physics (fundamental equations)
 from air_classifier.physics.particle_dynamics import compute_particle_forces, update_particle_motion
 from air_classifier.physics.air_flow import AirFlowModel
-from air_classifier.physics.collisions import handle_collisions, apply_boundaries_and_collection
+from air_classifier.physics.collisions import apply_boundaries_and_collection
+
+# Control parameters (machine configuration)
+from air_classifier.physics.control_parameters import PhysicalConstants
 
 
 @dataclass
@@ -171,16 +200,30 @@ class AirClassifierSimulator:
         print(f"  Starch particles: {starch_count}")
     
     def step(self):
-        """Perform one simulation step"""
+        """
+        Perform one simulation step
+
+        This method ORCHESTRATES the physics - it does NOT contain physics!
+        It simply calls the physics modules in the correct order.
+        """
         n = self.positions.shape[0]
-        
-        # 1. Compute air velocity field
+
+        # =====================================================================
+        # STEP 1: COMPUTE AIR VELOCITY FIELD
+        # =====================================================================
+        # Physics module: air_flow.py
+        # Computes v_air from fundamental equations (continuity + Rankine vortex)
         self.air_velocities = self.air_flow.compute_velocities(
             self.positions,
             device=self.device
         )
-        
-        # 2. Compute forces (CORRECTED - no centrifugal parameters!)
+
+        # =====================================================================
+        # STEP 2: COMPUTE FORCES ON PARTICLES
+        # =====================================================================
+        # Physics module: particle_dynamics.py
+        # Computes F = F_drag + F_gravity (NO explicit centrifugal force!)
+        # Uses physical constants from PhysicalConstants (air density, viscosity)
         wp.launch(
             kernel=compute_particle_forces,
             dim=n,
@@ -193,14 +236,19 @@ class AirClassifierSimulator:
                 self.forces,
                 self.masses,
                 self.air_velocities,
-                STANDARD_AIR.density,
-                STANDARD_AIR.viscosity,
-                self.bc['gravity']
+                # Physical constants (NOT tuning parameters!)
+                PhysicalConstants.AIR_DENSITY,
+                PhysicalConstants.AIR_VISCOSITY,
+                PhysicalConstants.GRAVITY
             ],
             device=self.device
         )
-        
-        # 3. Update motion (CORRECTED - added velocity_damping)
+
+        # =====================================================================
+        # STEP 3: UPDATE PARTICLE MOTION
+        # =====================================================================
+        # Physics module: particle_dynamics.py
+        # Integrates F=ma to update velocities and positions
         wp.launch(
             kernel=update_particle_motion,
             dim=n,
@@ -211,12 +259,17 @@ class AirClassifierSimulator:
                 self.masses,
                 self.active,
                 self.sim_config.dt,
-                0.999  # velocity_damping for stability
+                0.999  # velocity_damping (numerical stability)
             ],
             device=self.device
         )
-        
-        # 4. Apply boundaries and check collection (CORRECTED signature)
+
+        # =====================================================================
+        # STEP 4: APPLY BOUNDARY CONDITIONS AND COLLECT PARTICLES
+        # =====================================================================
+        # Physics module: collisions.py
+        # Handles wall collisions and collection at outlets (GEOMETRY ONLY!)
+        # NO size-based classification - physics determined the trajectories!
         wp.launch(
             kernel=apply_boundaries_and_collection,
             dim=n,
