@@ -2,6 +2,12 @@
 Configuration classes for air classifier simulation
 
 Based on the comprehensive engineering guide for yellow pea protein separation
+
+NOTE: The geometry module (geometry.py) handles the physical construction
+      of the classifier structure. This config file focuses on:
+      - Operating parameters (RPM, air velocity)
+      - Particle properties (size, density)
+      - Simulation parameters (time step, duration)
 """
 
 from dataclasses import dataclass

@@ -30,8 +30,18 @@ active_mask = active == 1
 active_positions = positions[active_mask]
 active_types = particle_types[active_mask]
 
-print(f"\nActive particles: {np.sum(active_mask)}")
-print(f"Collected particles: {np.sum(collection_times > 0)}")
+n_active = int(np.sum(active_mask))
+n_collected_by_time = int(np.sum(collection_times > 0))
+# Use simulator counts when available (fine + coarse) so total matches simulator
+state = simulator.get_state()
+n_fine = int(state.get('collected_fine', 0))
+n_coarse = int(state.get('collected_coarse', 0))
+n_collected_total = n_fine + n_coarse
+
+print(f"\nActive particles: {n_active}")
+print(f"Collected particles: {n_collected_total} (Fine={n_fine}, Coarse={n_coarse})")
+if n_collected_by_time != n_collected_total:
+    print(f"  (by collection_time>0: {n_collected_by_time})")
 
 # Analyze positions of active particles
 if len(active_positions) > 0:
