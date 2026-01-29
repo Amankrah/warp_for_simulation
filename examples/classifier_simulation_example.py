@@ -15,7 +15,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from air_classifier.geometry.corrected_config import create_default_config
 from air_classifier.geometry.assembly import build_complete_classifier
-from air_classifier.geometry.warp_integration import (
+from air_classifier.warp_integration import (
     create_boundary_meshes,
     create_boundary_conditions
 )

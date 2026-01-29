@@ -18,7 +18,16 @@ from .config import (
     get_pilot_scale_config
 )
 
-from .simulator import AirClassifierSimulator
+# Import from new classifier_simulator module
+# Note: This import may fail if warp is not available, so we make it optional
+try:
+    from .classifier_simulator import AirClassifierSimulator
+    # Note: SimulationConfig is already imported from .config above
+    # For the new simulator's SimulationConfig, import directly:
+    # from air_classifier.classifier_simulator import SimulationConfig
+except (ImportError, ModuleNotFoundError):
+    # Fallback if classifier_simulator doesn't exist or dependencies missing
+    AirClassifierSimulator = None
 
 from .analysis import (
     analyze_separation,

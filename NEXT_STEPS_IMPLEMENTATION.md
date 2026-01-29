@@ -39,7 +39,7 @@ visualize_complete_assembly(
 
 **Usage:**
 ```python
-from air_classifier.geometry.warp_integration import (
+from air_classifier.warp_integration import (
     create_boundary_meshes,
     create_boundary_conditions
 )
