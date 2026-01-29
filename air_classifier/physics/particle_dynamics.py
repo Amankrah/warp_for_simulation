@@ -1,33 +1,46 @@
 """
-CORRECTED Particle Dynamics for Air Classifier
+Particle Dynamics - FUNDAMENTAL PHYSICS ONLY
 
-Computes forces on particles and updates their motion.
+Computes forces on particles and updates their motion using ONLY fundamental laws:
+1. Newton's second law: F = ma
+2. Stokes drag law: F_drag = 6πμr·v_rel (for Re < 1)
+3. Schiller-Naumann correlation: Extended drag for higher Re
+4. Gravity: F_g = mg
 
-KEY FIXES:
-1. NO explicit centrifugal force - it emerges from swirling air!
-2. Proper Stokes drag for microparticles
-3. Correct force scaling
-4. Better integration scheme
+PHILOSOPHY:
+===========
+This module contains ONLY the physics - the unchanging laws of mechanics.
+All material properties (density) and physical constants (air viscosity, gravity)
+come from control_parameters.py
 
-PHYSICS EXPLANATION:
+FUNDAMENTAL FORCES:
 ===================
-In the original code, centrifugal force was added explicitly with a wrong
-formula (omega ∝ 1/r which goes to infinity at center).
+1. DRAG: F = 6πμr·(v_air - v_particle) [Stokes law]
+   - THE primary force on microparticles
+   - Couples particle motion to air flow
+   - Centrifugal effect EMERGES from tangential drag component!
 
-In reality, centrifugal "force" on particles comes from the SWIRLING AIR:
-1. Air swirls tangentially (v_θ)
-2. Drag force accelerates particle in tangential direction
-3. Particle gains tangential velocity
-4. Particle's circular motion creates centrifugal acceleration
+2. GRAVITY: F = m·g
+   - Always downward
+   - Opposes upward flow
+   - Helps large particles settle
 
-If the air velocity field is correct (with proper v_θ from vortex model),
-the centrifugal effect EMERGES NATURALLY from the drag force.
-We don't need to add it explicitly!
+NO EXPLICIT CENTRIFUGAL FORCE!
+===============================
+The centrifugal "force" is NOT added explicitly because:
+1. Air swirls tangentially (v_θ from Rankine vortex)
+2. Drag accelerates particle tangentially
+3. Particle follows curved path → centrifugal acceleration emerges
+4. This is THE CORRECT PHYSICS! Not F_cent = m·ω²·r
+
+If we added explicit centrifugal force ON TOP of drag from swirling air,
+we would DOUBLE-COUNT the centrifugal effect!
 """
 
 import numpy as np
 import warp as wp
 
+# Mathematical constant (not a tuning parameter!)
 PI = 3.14159265359
 
 
@@ -39,29 +52,38 @@ def compute_stokes_drag(
 ) -> wp.vec3:
     """
     Compute Stokes drag force for small particles (Re < 1)
-    
-    For microparticles (d < 100 μm), Reynolds number is typically < 1,
-    so Stokes law applies:
-    
-    F_drag = 6·π·μ·r·v_rel = 3·π·μ·d·v_rel
-    
-    This is the PRIMARY force that:
-    1. Pulls particles with the air flow
-    2. Creates centrifugal motion (from tangential air velocity)
-    3. Drags fine particles inward (from radial air inflow)
-    
+
+    FUNDAMENTAL LAW: Stokes drag (textbook equation!)
+        F_drag = 6·π·μ·r·v_rel = 3·π·μ·d·v_rel
+
+    Valid for: Reynolds number Re = ρ·v·d/μ < 1
+    Typical for: Microparticles in air (d < 100 μm)
+
+    Physical meaning:
+    1. Force opposes relative motion (toward air velocity)
+    2. Linear in velocity (low Re → no turbulence)
+    3. Stronger for larger particles (∝ d)
+    4. Stronger in more viscous fluids (∝ μ)
+
+    This drag force is THE mechanism that:
+    - Pulls particles with air flow
+    - Creates centrifugal motion (from tangential air component)
+    - Drags fine particles inward (from radial air inflow)
+
     Args:
-        v_rel: Relative velocity (particle - air)
-        diameter: Particle diameter (m)
-        air_viscosity: Air dynamic viscosity (Pa·s)
-        
+        v_rel: Relative velocity (particle - air) [m/s]
+        diameter: Particle diameter [m]
+        air_viscosity: Air dynamic viscosity [Pa·s] (PHYSICAL CONSTANT!)
+
     Returns:
-        Drag force vector (N)
+        Drag force vector [N]
     """
-    # Stokes drag: F = 6πμr·v = 3πμd·v
-    # Direction: opposite to relative velocity (toward air velocity)
+    # Stokes drag coefficient: 3πμd
+    # (Factor of 3 comes from: 6πμr = 6πμ(d/2) = 3πμd)
     drag_coeff = 3.0 * PI * air_viscosity * diameter
-    
+
+    # Force direction: opposite to relative velocity
+    # Negative sign: pulls particle toward air velocity
     return -v_rel * drag_coeff
 
 
@@ -137,27 +159,43 @@ def compute_particle_forces_corrected(
     masses: wp.array(dtype=wp.float32),
     # Air properties
     air_velocities: wp.array(dtype=wp.vec3),
-    air_density: float,
-    air_viscosity: float,
+    air_density: float,          # PHYSICAL CONSTANT from control_parameters
+    air_viscosity: float,        # PHYSICAL CONSTANT from control_parameters
     # Gravity
-    gravity: float
+    gravity: float               # PHYSICAL CONSTANT from control_parameters
 ):
     """
-    Compute all forces on particles (CORRECTED VERSION)
-    
-    Forces included:
-    1. GRAVITY: F = m·g (downward)
-    2. DRAG: F = 6πμr·(v_air - v_particle) (Stokes, toward air velocity)
-    
-    Forces NOT included (and why):
-    - CENTRIFUGAL: Emerges naturally from drag + swirling air
-    - BUOYANCY: Negligible for solid particles in air
+    Compute forces on particles using FUNDAMENTAL PHYSICS ONLY
+
+    FORCES INCLUDED:
+    ================
+    1. DRAG: F = 6πμr·(v_air - v_particle)
+       - Stokes law for Re < 1
+       - Schiller-Naumann for higher Re
+       - THE primary force on microparticles
+
+    2. GRAVITY: F = m·g
+       - Always downward
+       - Constant acceleration
+
+    FORCES EXCLUDED (and why):
+    ===========================
+    - CENTRIFUGAL: Emerges from drag + swirling air (already included!)
+    - BUOYANCY: Negligible (ρ_particle/ρ_air ≈ 1000)
     - BASSET HISTORY: Negligible for steady-state
     - ADDED MASS: Negligible (ρ_particle >> ρ_air)
-    
-    The key insight: If the air velocity field has proper tangential component,
-    the drag force will accelerate particles tangentially, creating circular
-    motion. This circular motion IS the centrifugal effect!
+    - MAGNUS: Negligible (no particle rotation)
+    - SAFFMAN LIFT: Negligible (low shear)
+
+    KEY INSIGHT:
+    ============
+    Centrifugal "force" is NOT added explicitly!
+    - Air swirls tangentially (v_θ from Rankine vortex)
+    - Drag accelerates particle tangentially
+    - Particle follows curved path
+    - Centrifugal acceleration emerges naturally from Newton's laws!
+
+    Adding explicit F_cent = m·ω²·r would DOUBLE-COUNT the effect!
     """
     i = wp.tid()
     
@@ -180,19 +218,31 @@ def compute_particle_forces_corrected(
     # Relative velocity (particle relative to air)
     v_rel = vel - v_air
     
-    # === DRAG FORCE ===
-    # For microparticles (d < 50 μm), use Stokes drag
-    # This is accurate for Re < 1, which is typical for air classification
+    # === DRAG FORCE (PRIMARY FORCE!) ===
+    # Choose appropriate drag model based on particle size
+    # For microparticles (d < 50 μm): Stokes drag (Re < 1)
+    # For larger particles: Extended drag with Re dependence
     if d < 50e-6:
         F_drag = compute_stokes_drag(v_rel, d, air_viscosity)
     else:
         F_drag = compute_drag_force_extended(v_rel, d, rho, air_density, air_viscosity)
-    
-    # === GRAVITY ===
+
+    # === GRAVITY (CONSTANT FORCE) ===
+    # Always acts downward (negative z direction)
+    # F_g = m·g where g = 9.81 m/s² (PHYSICAL CONSTANT!)
     F_gravity = wp.vec3(0.0, 0.0, -gravity * mass)
-    
-    # === TOTAL FORCE ===
-    # NO explicit centrifugal force - it emerges from the swirling air!
+
+    # === TOTAL FORCE (FUNDAMENTAL PHYSICS!) ===
+    # Only drag + gravity!
+    # NO explicit centrifugal force - it emerges from swirling air!
+    #
+    # Centrifugal effect comes from:
+    #   1. Air has tangential velocity v_θ (from Rankine vortex)
+    #   2. Drag pulls particle tangentially → particle gains v_θ
+    #   3. Particle moves in circular path → a_cent = v_θ²/r
+    #   4. This IS the centrifugal acceleration!
+    #
+    # Adding F_cent = m·ω²·r would be DOUBLE-COUNTING!
     forces[i] = F_gravity + F_drag
 
 

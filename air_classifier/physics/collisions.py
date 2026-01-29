@@ -1,34 +1,44 @@
 """
-CORRECTED Collision Detection and Collection
+Collision Detection and Collection - GEOMETRY-BASED ONLY
 
 Handles particle-boundary collisions and collection at outlets.
 
-KEY FIXES:
-1. NO size-based classification - physics determines separation!
-2. Collection ONLY at actual outlets (top = fines, bottom = coarse)
-3. Proper wall reflection with cone geometry
-4. Stable boundary handling
-
 PHILOSOPHY:
-==========
-The old code classified particles by SIZE + POSITION:
-  "if small AND at top → fines"
-  "if large AND at bottom → coarse"
+===========
+This module handles ONLY geometry-based operations:
+1. Particle hits wall → reflect (elastic/inelastic collision)
+2. Particle reaches outlet → collect (remove from simulation)
+3. NO SIZE-BASED CLASSIFICATION!
 
-This is WRONG because it bypasses the physics entirely!
+The PHYSICS (in particle_dynamics.py + air_flow.py) determines trajectories.
+The COLLECTION (here) simply records where particles exit.
 
-The CORRECT approach:
-1. Let physics (drag vs centrifugal) determine particle trajectories
-2. Collect particles ONLY when they reach actual outlets
-3. Small particles naturally go up (drag wins) → exit at top = FINES
-4. Large particles naturally go down (centrifugal wins) → exit at bottom = COARSE
+FUNDAMENTAL PRINCIPLE:
+======================
+Separation is determined by PHYSICS, not by collection logic!
 
-The PHYSICS determines the separation, not the collection code!
+Small particles:
+  - Drag > Centrifugal → pulled inward by radial flow
+  - Rise through selector → exit at TOP = FINES
+
+Large particles:
+  - Centrifugal > Drag → pushed outward
+  - Fall in annular zone → exit at BOTTOM = COARSE
+
+This code does NOT check particle size!
+If a large particle reaches the fines outlet, it's collected as fines
+(though this shouldn't happen if physics is correct).
+
+PARAMETERS:
+===========
+All geometric parameters (outlet positions, radii) come from control_parameters.py
+Restitution coefficient (energy loss in collisions) could be tuned, but typically 0.3-0.5
 """
 
 import warp as wp
 from typing import Dict, Optional
 
+# Mathematical constant (not a tuning parameter!)
 PI = 3.14159265359
 
 
@@ -45,32 +55,45 @@ def apply_boundaries_and_collection_corrected(
     collection_time: wp.array(dtype=wp.float32),
     collection_position: wp.array(dtype=wp.vec3),
     collection_outlet: wp.array(dtype=wp.int32),
-    # Geometry
+    # GEOMETRY (fixed machine dimensions from control_parameters)
     chamber_radius: float,
     chamber_height: float,
     cone_height: float,
-    # Outlets
+    # OUTLETS (geometric positions from control_parameters)
     fines_outlet_z: float,
     fines_outlet_radius: float,
     coarse_outlet_z: float,
     coarse_outlet_radius: float,
-    # Simulation
+    # Simulation parameters
     current_time: float,
-    restitution: float
+    restitution: float  # Collision energy loss (0.3 = 70% energy lost)
 ):
     """
     Apply boundary conditions and collect particles at OUTLETS ONLY
-    
+
+    PURE GEOMETRY - NO PHYSICS!
+    ===========================
+    This kernel handles:
+    1. Particle-wall collisions (elastic/inelastic reflection)
+    2. Particle collection at outlets (geometric check only)
+
     NO SIZE-BASED CLASSIFICATION!
-    
-    The physics (drag vs centrifugal) has already determined the particle
-    trajectories. We simply collect them where they exit:
-    
-    - FINES OUTLET (top): Particles that reach the top = small particles
-    - COARSE OUTLET (bottom): Particles that reach the bottom = large particles
-    
-    The separation quality depends on the PHYSICS being correct,
-    not on adding size checks here!
+    ==============================
+    Collection criterion is PURELY geometric:
+    - Particle position reaches outlet region → collect
+    - NO check of particle size!
+
+    The PHYSICS has already determined the trajectory:
+    - Small particles: drag > centrifugal → go up → exit at FINES outlet
+    - Large particles: centrifugal > drag → go down → exit at COARSE outlet
+
+    If physics is correct, particles will naturally separate by size.
+    If physics is wrong, this code won't "fix" it by adding size checks!
+
+    PARAMETERS:
+    ===========
+    All geometric parameters (outlets, radii) from control_parameters.py
+    Restitution: typical value 0.3 (70% energy lost), could be material-specific
     """
     i = wp.tid()
     
@@ -85,42 +108,45 @@ def apply_boundaries_and_collection_corrected(
     # =========================================================================
     # FINES COLLECTION (TOP OUTLET)
     # =========================================================================
-    # Particles that reach the fines outlet exit as FINES
-    # No size check! If physics is correct, only small particles get here.
-    
+    # GEOMETRIC CHECK ONLY: Has particle reached top outlet?
+    # NO SIZE CHECK! Physics determines which particles get here.
+
     if z >= fines_outlet_z:
         if r < fines_outlet_radius:
-            # Particle exits through fines outlet
+            # Particle exits through fines outlet → COLLECT AS FINES
+            # This happens naturally for small particles (drag > centrifugal)
             wp.atomic_add(collected_fine, 0, 1)
             active[i] = 0
             collection_time[i] = current_time
             collection_position[i] = pos
-            collection_outlet[i] = 1
+            collection_outlet[i] = 1  # Outlet ID: 1 = fines
             return
         else:
-            # Particle hit top but outside outlet - reflect back
+            # Particle hit top but OUTSIDE outlet → REFLECT
+            # (Shouldn't happen often if geometry is well-designed)
             positions[i] = wp.vec3(pos[0], pos[1], fines_outlet_z - 0.01)
             velocities[i] = wp.vec3(vel[0], vel[1], -wp.abs(vel[2]) * restitution)
             return
-    
+
     # =========================================================================
     # COARSE COLLECTION (BOTTOM OUTLET)
     # =========================================================================
-    # Particles that reach the coarse outlet exit as COARSE
-    # No size check! If physics is correct, only large particles get here.
-    
+    # GEOMETRIC CHECK ONLY: Has particle reached bottom outlet?
+    # NO SIZE CHECK! Physics determines which particles get here.
+
     if z <= coarse_outlet_z:
         if r < coarse_outlet_radius:
-            # Particle exits through coarse outlet
+            # Particle exits through coarse outlet → COLLECT AS COARSE
+            # This happens naturally for large particles (centrifugal > drag)
             wp.atomic_add(collected_coarse, 0, 1)
             active[i] = 0
             collection_time[i] = current_time
             collection_position[i] = pos
-            collection_outlet[i] = 2
+            collection_outlet[i] = 2  # Outlet ID: 2 = coarse
             return
         else:
             # In cone but not at outlet - redirect toward outlet
-            # Cone wall will push particle toward center
+            # Cone wall naturally pushes particles toward center
             positions[i] = wp.vec3(pos[0] * 0.95, pos[1] * 0.95, coarse_outlet_z + 0.01)
             velocities[i] = wp.vec3(vel[0] * 0.5, vel[1] * 0.5, -wp.abs(vel[2]) * 0.3)
             return
@@ -128,30 +154,37 @@ def apply_boundaries_and_collection_corrected(
     # =========================================================================
     # CYLINDRICAL WALL COLLISION
     # =========================================================================
+    # GEOMETRY: Elastic/inelastic reflection at chamber wall
+    # Radial component reversed, tangential preserved, energy lost via restitution
+
     if r >= chamber_radius * 0.99:
-        # Hit outer wall - reflect
+        # Particle hit outer wall → REFLECT
+
+        # Push back inside (numerical stability)
         r_safe = chamber_radius * 0.98
         scale = r_safe / r
         new_x = pos[0] * scale
         new_y = pos[1] * scale
-        
-        # Decompose velocity into radial and tangential
+
+        # Decompose velocity into radial and tangential components
         if r > 0.01:
+            # Unit vectors in cylindrical coordinates
             cos_t = pos[0] / r
             sin_t = pos[1] / r
-            
-            v_r = vel[0] * cos_t + vel[1] * sin_t  # Radial component
-            v_t = -vel[0] * sin_t + vel[1] * cos_t  # Tangential component
-            
-            # Reflect radial, preserve tangential
+
+            # Velocity in cylindrical coordinates
+            v_r = vel[0] * cos_t + vel[1] * sin_t  # Radial (toward/away from center)
+            v_t = -vel[0] * sin_t + vel[1] * cos_t  # Tangential (circumferential)
+
+            # Reflection: reverse radial, keep tangential, apply energy loss
             v_r = -v_r * restitution
-            
+
             # Convert back to Cartesian
             new_vx = v_r * cos_t - v_t * sin_t
             new_vy = v_r * sin_t + v_t * cos_t
-            
+
             velocities[i] = wp.vec3(new_vx, new_vy, vel[2])
-        
+
         positions[i] = wp.vec3(new_x, new_y, pos[2])
     
     # =========================================================================
