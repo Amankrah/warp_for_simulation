@@ -1,11 +1,17 @@
 """
 Vitamin A degradation kinetics during boiling
+
+Models three mechanisms:
+1. Thermal degradation (first-order kinetics)
+2. Internal diffusion within food matrix
+3. Leaching from food surface to water
 """
 
 import warp as wp
 import numpy as np
 from dataclasses import dataclass
 from typing import Optional
+from .diffusion_model import NutrientDiffusion
 
 
 @dataclass
@@ -165,24 +171,50 @@ def compute_leaching_to_water(
 
 
 class VitaminAKinetics:
-    """Vitamin A degradation and leaching kinetics"""
+    """
+    Vitamin A degradation and leaching kinetics
+
+    Combines three physical mechanisms:
+    1. **Thermal degradation**: First-order Arrhenius kinetics
+    2. **Internal diffusion**: 3D Fickian diffusion within food
+    3. **Surface leaching**: Mass transfer to water at interface
+
+    This provides a comprehensive model of nutrient loss during boiling.
+    """
 
     def __init__(
         self,
-        properties: VitaminAProperties = VitaminAProperties()
+        properties: VitaminAProperties = VitaminAProperties(),
+        enable_diffusion: bool = True,
+        enable_leaching: bool = True
     ):
         """
         Initialize Vitamin A kinetics model
 
         Args:
             properties: Vitamin A properties
+            enable_diffusion: Enable internal diffusion simulation
+            enable_leaching: Enable surface leaching to water
         """
         self.props = properties
+        self.enable_diffusion = enable_diffusion
+        self.enable_leaching = enable_leaching
 
         # Warp arrays
         self.food_concentration = None
         self.water_concentration = None
         self.rate_constants = None
+
+        # Diffusion model
+        self.diffusion_model = None
+        if enable_diffusion:
+            self.diffusion_model = NutrientDiffusion(
+                diffusion_coefficient=properties.diffusion_coefficient
+            )
+
+        # Surface tracking
+        self.is_surface_point = None
+        self.grid_points = None
 
     def initialize_concentrations(
         self,
@@ -205,6 +237,60 @@ class VitaminAKinetics:
         water_conc = np.zeros(num_water_points, dtype=np.float32)
         self.water_concentration = wp.array(water_conc, dtype=float)
 
+    def initialize_diffusion_grid(
+        self,
+        grid_indices: np.ndarray,
+        grid_points: np.ndarray,
+        mesh_points: np.ndarray,
+        nx: int,
+        ny: int,
+        nz: int,
+        food_dimensions: tuple
+    ):
+        """
+        Initialize diffusion model grid structure
+
+        Args:
+            grid_indices: (num_points, 3) array of (i,j,k) indices
+            grid_points: (num_points, 3) array of (x,y,z) positions
+            mesh_points: (num_vertices, 3) array of mesh vertices
+            nx, ny, nz: Grid dimensions
+            food_dimensions: (width, depth, height) in meters
+        """
+        if not self.enable_diffusion:
+            print("Diffusion model disabled, skipping grid initialization")
+            return
+
+        # Calculate grid spacing
+        dx = food_dimensions[0] / (nx - 1) if nx > 1 else food_dimensions[0]
+        dy = food_dimensions[1] / (ny - 1) if ny > 1 else food_dimensions[1]
+        dz = food_dimensions[2] / (nz - 1) if nz > 1 else food_dimensions[2]
+
+        # Initialize diffusion model grid
+        self.diffusion_model.initialize_grid(
+            grid_indices=grid_indices,
+            nx=nx,
+            ny=ny,
+            nz=nz,
+            dx=dx,
+            dy=dy,
+            dz=dz
+        )
+
+        # Identify surface points for leaching
+        if self.enable_leaching:
+            is_surface = self.diffusion_model.identify_surface_points(
+                grid_points=grid_points,
+                food_mesh_points=mesh_points,
+                threshold_distance=max(dx, dy, dz) * 1.5
+            )
+            self.is_surface_point = wp.array(is_surface, dtype=int)
+            self.grid_points = wp.array(grid_points, dtype=wp.vec3)
+
+        print(f"\nVitamin A kinetics initialized:")
+        print(f"  - Diffusion: {'Enabled' if self.enable_diffusion else 'Disabled'}")
+        print(f"  - Leaching: {'Enabled' if self.enable_leaching else 'Disabled'}")
+
     def update_rate_constants(self, temperature: wp.array):
         """
         Update degradation rate constants based on temperature field
@@ -224,6 +310,9 @@ class VitaminAKinetics:
     def step_degradation(self, dt: float, num_points: int):
         """
         Advance degradation simulation by one time step
+
+        Applies thermal degradation only (no diffusion or leaching).
+        Use step_full() for complete multi-physics simulation.
 
         Args:
             dt: Time step (s)
@@ -247,6 +336,54 @@ class VitaminAKinetics:
         # Swap buffers
         self.food_concentration, self.food_concentration_new = \
             self.food_concentration_new, self.food_concentration
+
+    def step_full(
+        self,
+        dt: float,
+        num_points: int,
+        mass_transfer_coeff: float = 1e-5
+    ):
+        """
+        Complete multi-physics step including:
+        1. Thermal degradation
+        2. Internal diffusion
+        3. Surface leaching
+
+        Args:
+            dt: Time step (s)
+            num_points: Number of food grid points
+            mass_transfer_coeff: Mass transfer coefficient k_m (m/s)
+        """
+        # Step 1: Thermal degradation
+        self.step_degradation(dt, num_points)
+
+        # Step 2: Internal diffusion (if enabled)
+        if self.enable_diffusion and self.diffusion_model is not None:
+            self.diffusion_model.step(
+                concentration=self.food_concentration,
+                concentration_new=self.food_concentration_new,
+                dt=dt,
+                num_points=num_points
+            )
+            # Swap buffers after diffusion
+            self.food_concentration, self.food_concentration_new = \
+                self.food_concentration_new, self.food_concentration
+
+        # Step 3: Surface leaching (if enabled)
+        if self.enable_leaching and self.is_surface_point is not None:
+            # Average water concentration (simplified)
+            water_conc_avg = float(np.mean(self.water_concentration.numpy()))
+
+            self.diffusion_model.apply_leaching(
+                concentration=self.food_concentration,
+                grid_points=self.grid_points,
+                is_surface_point=self.is_surface_point,
+                mass_transfer_coeff=mass_transfer_coeff,
+                water_concentration=water_conc_avg,
+                partition_coefficient=self.props.partition_coefficient,
+                dt=dt,
+                num_points=num_points
+            )
 
     def get_retention_percentage(self) -> float:
         """
