@@ -75,12 +75,24 @@ class LiquidDomainConfig:
 class FoodItemConfig:
     """Configuration for food items (carrots, potatoes, etc.)"""
 
-    # Carrot dimensions
+    # Carrot dimensions (for stick/baton cuts)
     carrot_radius: float = 0.015        # 1.5 cm radius
-    carrot_length: float = 0.05         # 5 cm length
+    carrot_length: float = 0.05         # 5 cm length (stick cut)
+
+    # Carrot round (coin) dimensions
+    carrot_round_radius: float = 0.015  # 1.5 cm radius
+    carrot_round_thickness: float = 0.015  # 1.5 cm thick
+
+    # Carrot chunk dimensions
+    carrot_chunk_width: float = 0.015   # 1.5 cm
+    carrot_chunk_depth: float = 0.015   # 1.5 cm
+    carrot_chunk_height: float = 0.025  # 2.5 cm
 
     # Potato dimensions
     potato_radius: float = 0.03         # 3 cm radius (spherical)
+
+    # Cut type
+    carrot_cut_type: str = "round"      # "round", "stick", "chunk"
 
     # Mesh resolution
     circumferential_segments: int = 24
@@ -115,7 +127,7 @@ class BoilingConfig:
     assembly: AssemblyConfig = None
 
     # Scene settings
-    num_food_pieces: int = 3
+    num_food_pieces: int = 15            # Realistic portion size
     food_type: str = "carrot"           # "carrot", "potato", etc.
     with_lid: bool = True
 

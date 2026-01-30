@@ -1,5 +1,40 @@
 """
-Improved liquid domain for boiling simulation
+Realistic liquid domain for boiling simulation
+
+Physical Model:
+---------------
+Water behavior is governed by fundamental fluid properties:
+
+1. **Gravity & Hydrostatic Pressure**
+   - Water fills the container from bottom upward
+   - Uniform horizontal layers due to gravitational settling
+   - Pressure increases linearly with depth: P = ρgh
+
+2. **Container Conformity**
+   - Water takes the exact shape of the cylindrical chamber
+   - Direct contact with saucepan inner walls (no air gaps)
+   - Direct contact with flat circular bottom
+
+3. **Free Surface**
+   - Top surface is flat and horizontal (air-water interface)
+   - Surface level determined by volume and container geometry
+   - Surface tension effects (meniscus) neglected for large containers
+
+4. **Incompressibility**
+   - Water density assumed constant (ρ ≈ 1000 kg/m³)
+   - Volume preservation: V = πr²h
+   - No compression under atmospheric pressure
+
+5. **Thermal Properties**
+   - Heat capacity: cp ≈ 4186 J/(kg·K)
+   - Thermal conductivity: k ≈ 0.6 W/(m·K)
+   - Convection currents develop during heating
+
+Implementation:
+--------------
+- Visual mesh: Closed cylindrical volume for realistic 3D rendering
+- Computational grid: Discrete points for physics simulation (SPH, temperature, convection)
+- Dual representation allows both visualization and accurate physics
 """
 
 import warp as wp
@@ -15,13 +50,13 @@ from config import LiquidDomainConfig
 
 class LiquidDomain(GeometryComponent):
     """
-    Improved 3D computational domain for liquid simulation
+    Realistic 3D liquid volume for boiling simulation
 
     Features:
-    - Cylindrical grid generation (more efficient for round containers)
+    - Volumetric mesh representation (not just point cloud)
+    - Cylindrical water volume with realistic surface
+    - Computational grid for physics (SPH particles, temperature, convection)
     - Configuration-driven parameters
-    - Better boundary handling
-    - Neighbor connectivity for SPH
     """
 
     def __init__(
@@ -34,7 +69,7 @@ class LiquidDomain(GeometryComponent):
         use_cylindrical_grid: bool = True
     ):
         """
-        Create a liquid domain for boiling simulation
+        Create a realistic liquid domain for boiling simulation
 
         Args:
             name: Component name
@@ -55,11 +90,188 @@ class LiquidDomain(GeometryComponent):
         self.resolution = resolution if resolution is not None else config.resolution
         self.use_cylindrical_grid = use_cylindrical_grid
 
-        # Create grid points for liquid domain
-        self._build_grid()
+        # Build both visual mesh and computational grid
+        self._build_visual_mesh()
+        self._build_computational_grid()
 
-    def _build_grid(self):
-        """Build the liquid domain computational grid"""
+    def _build_visual_mesh(self):
+        """
+        Build realistic volumetric mesh for water visualization
+
+        Water behavior follows fundamental fluid properties:
+        1. Gravity: Water fills from bottom upward
+        2. Container conformity: Water takes exact shape of cylindrical chamber
+        3. Free surface: Flat horizontal surface at top (no container constraint)
+        4. Incompressibility: Uniform density, fills volume completely
+        5. No air gaps: Water is in direct contact with chamber walls and bottom
+
+        Creates a cylindrical volume with:
+        - Curved side wall (in contact with saucepan inner wall)
+        - Flat horizontal top surface (free water surface exposed to air)
+        - Flat bottom surface (in contact with saucepan bottom)
+        """
+        vertices = []
+        faces = []
+
+        # Number of segments for smooth cylindrical shape
+        num_theta = 48  # Circumferential segments (smooth contact with walls)
+        num_radial = 10  # Radial segments for top/bottom surfaces
+        num_z = 12      # Vertical segments (for convection visualization)
+
+        # Build cylindrical side wall (water in contact with container)
+        # Water perfectly conforms to the cylindrical shape of the saucepan
+        for iz in range(num_z + 1):
+            z = (iz / num_z) * self.height
+
+            for itheta in range(num_theta):
+                theta = (itheta / num_theta) * 2 * np.pi
+                # Water extends to full radius - direct contact with saucepan inner wall
+                x = self.radius * np.cos(theta)
+                y = self.radius * np.sin(theta)
+                vertices.append([x, y, z])
+
+        # Build side wall faces (water-container interface)
+        # These faces represent the water in contact with the cylindrical chamber wall
+        for iz in range(num_z):
+            for itheta in range(num_theta):
+                next_theta = (itheta + 1) % num_theta
+
+                v0 = iz * num_theta + itheta
+                v1 = iz * num_theta + next_theta
+                v2 = (iz + 1) * num_theta + next_theta
+                v3 = (iz + 1) * num_theta + itheta
+
+                # Inward-facing normals (visible from inside the water volume)
+                faces.append([v0, v2, v1])
+                faces.append([v0, v3, v2])
+
+        # Build top surface (free water surface exposed to air)
+        # This is a flat, horizontal surface due to gravity
+        # Surface tension creates a meniscus at edges (not modeled here for simplicity)
+        top_start_idx = len(vertices)
+
+        # Center point at water surface
+        center_top_idx = len(vertices)
+        vertices.append([0.0, 0.0, self.height])
+
+        # Radial rings - water surface extends to full radius
+        for ir in range(1, num_radial + 1):
+            r = (ir / num_radial) * self.radius
+
+            for itheta in range(num_theta):
+                theta = (itheta / num_theta) * 2 * np.pi
+                x = r * np.cos(theta)
+                y = r * np.sin(theta)
+                # All points at same height - flat horizontal surface
+                vertices.append([x, y, self.height])
+
+        # Top surface faces (upward-facing normals - visible from above)
+        # Center to first ring
+        for itheta in range(num_theta):
+            next_theta = (itheta + 1) % num_theta
+            v0 = center_top_idx
+            v1 = center_top_idx + 1 + itheta
+            v2 = center_top_idx + 1 + next_theta
+            faces.append([v0, v2, v1])  # Upward normal
+
+        # Between radial rings
+        for ir in range(num_radial - 1):
+            for itheta in range(num_theta):
+                next_theta = (itheta + 1) % num_theta
+
+                v0 = center_top_idx + 1 + ir * num_theta + itheta
+                v1 = center_top_idx + 1 + (ir + 1) * num_theta + itheta
+                v2 = center_top_idx + 1 + (ir + 1) * num_theta + next_theta
+                v3 = center_top_idx + 1 + ir * num_theta + next_theta
+
+                faces.append([v0, v2, v1])  # Upward normal
+                faces.append([v0, v3, v2])
+
+        # Connect outer ring of top surface to top edge of side wall
+        # This ensures water volume is closed and conforms to container
+        last_ring_idx = center_top_idx + 1 + (num_radial - 1) * num_theta
+        top_wall_idx = num_z * num_theta
+
+        for itheta in range(num_theta):
+            next_theta = (itheta + 1) % num_theta
+
+            v0 = last_ring_idx + itheta
+            v1 = top_wall_idx + itheta
+            v2 = top_wall_idx + next_theta
+            v3 = last_ring_idx + next_theta
+
+            faces.append([v0, v2, v1])
+            faces.append([v0, v3, v2])
+
+        # Build bottom surface (water in direct contact with saucepan bottom)
+        # Due to gravity, water settles and makes complete contact with the base
+        # No air gaps - water conforms perfectly to the flat circular bottom
+        bottom_start_idx = len(vertices)
+
+        # Center point at z=0 (resting on saucepan bottom)
+        center_bottom_idx = len(vertices)
+        vertices.append([0.0, 0.0, 0.0])
+
+        # Radial rings - water covers entire circular base
+        for ir in range(1, num_radial + 1):
+            r = (ir / num_radial) * self.radius
+
+            for itheta in range(num_theta):
+                theta = (itheta / num_theta) * 2 * np.pi
+                x = r * np.cos(theta)
+                y = r * np.sin(theta)
+                # All points at z=0 - flat surface in contact with container bottom
+                vertices.append([x, y, 0.0])
+
+        # Bottom surface faces (downward-facing normals - visible from below)
+        # Center to first ring
+        for itheta in range(num_theta):
+            next_theta = (itheta + 1) % num_theta
+            v0 = center_bottom_idx
+            v1 = center_bottom_idx + 1 + itheta
+            v2 = center_bottom_idx + 1 + next_theta
+            faces.append([v0, v1, v2])  # Downward normal
+
+        # Between radial rings
+        for ir in range(num_radial - 1):
+            for itheta in range(num_theta):
+                next_theta = (itheta + 1) % num_theta
+
+                v0 = center_bottom_idx + 1 + ir * num_theta + itheta
+                v1 = center_bottom_idx + 1 + (ir + 1) * num_theta + itheta
+                v2 = center_bottom_idx + 1 + (ir + 1) * num_theta + next_theta
+                v3 = center_bottom_idx + 1 + ir * num_theta + next_theta
+
+                faces.append([v0, v1, v2])
+                faces.append([v0, v2, v3])
+
+        # Connect outer ring of bottom surface to bottom edge of side wall
+        # Ensures water volume is sealed and conforms perfectly to cylindrical chamber
+        last_ring_bottom_idx = center_bottom_idx + 1 + (num_radial - 1) * num_theta
+        bottom_wall_idx = 0
+
+        for itheta in range(num_theta):
+            next_theta = (itheta + 1) % num_theta
+
+            v0 = last_ring_bottom_idx + itheta
+            v1 = bottom_wall_idx + itheta
+            v2 = bottom_wall_idx + next_theta
+            v3 = last_ring_bottom_idx + next_theta
+
+            faces.append([v0, v1, v2])
+            faces.append([v0, v2, v3])
+
+        # Convert to Warp mesh
+        vertices = np.array(vertices, dtype=np.float32)
+        faces = np.array(faces, dtype=np.int32)
+
+        self.mesh = wp.Mesh(
+            points=wp.array(vertices, dtype=wp.vec3),
+            indices=wp.array(faces.flatten(), dtype=int)
+        )
+
+    def _build_computational_grid(self):
+        """Build computational grid for physics simulation"""
         if self.use_cylindrical_grid:
             self._build_cylindrical_grid()
         else:

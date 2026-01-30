@@ -116,15 +116,15 @@ class GeometryVisualizer:
                     label=comp_name
                 )
 
-            # Show grid points for liquid domain
-            if show_grid_points and hasattr(component, 'grid_points'):
+            # Show computational grid points for liquid domain (subtle visualization)
+            if show_grid_points and hasattr(component, 'grid_points') and 'water' in comp_name.lower():
                 grid_cloud = create_point_cloud(component.grid_points)
                 plotter.add_mesh(
                     grid_cloud,
-                    color='cyan',
-                    point_size=2,
-                    render_points_as_spheres=True,
-                    opacity=0.3,
+                    color='darkblue',
+                    point_size=1,
+                    render_points_as_spheres=False,
+                    opacity=0.15,
                     label=f'{comp_name} grid'
                 )
 
@@ -424,8 +424,9 @@ class GeometryVisualizer:
             opacity = 0.4
             show_edges = True
         elif 'water' in comp_name.lower():
-            color = 'cyan'
-            opacity = 0.1
+            # Realistic water appearance: translucent blue-cyan
+            color = 'lightblue'
+            opacity = 0.4
             show_edges = False
         elif 'carrot' in comp_name.lower():
             color = 'orange'

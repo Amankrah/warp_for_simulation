@@ -127,8 +127,9 @@ def compute_leaching_to_water(
     C_food = food_concentration[tid]
 
     # Find nearest water point (simplified - in practice use spatial hash)
-    min_dist = 1e10
-    nearest_water_idx = -1
+    # Declare as dynamic variables (not constants) for loop mutation
+    min_dist = float(1e10)
+    nearest_water_idx = int(-1)
 
     for i in range(num_water_points):
         pos_water = water_positions[i]

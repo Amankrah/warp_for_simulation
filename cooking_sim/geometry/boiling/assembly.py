@@ -330,9 +330,19 @@ class SaucepanBuilder:
         water_height = config.get_water_level()
         water_top_z = water_bottom_z + water_height
 
-        # Get food height from config
+        # Get cut type from config
+        cut_type = config.food.carrot_cut_type if food_type == "carrot" else None
+
+        # Get food height from config based on cut type
         if food_type == "carrot":
-            food_height = config.food.carrot_length
+            if cut_type == "round":
+                food_height = config.food.carrot_round_thickness
+            elif cut_type == "stick":
+                food_height = config.food.carrot_length
+            elif cut_type == "chunk":
+                food_height = config.food.carrot_chunk_height
+            else:
+                food_height = config.food.carrot_length
         elif food_type == "potato":
             food_height = config.food.potato_radius * 2
         else:
@@ -343,19 +353,23 @@ class SaucepanBuilder:
             food = FoodObject(
                 name=f"{food_type}_piece_{i}",
                 food_type=food_type,
+                cut_type=cut_type if food_type == "carrot" else "",
                 config=config.food,
                 position=(0, 0, 0)  # Create at origin
             )
 
-            # Position food to rest on water bottom, ensuring full submersion
-            # Food center is at half its height above the water bottom
-            z_center = water_bottom_z + food_height * 0.5
+            # Realistic physics: Carrots and potatoes sink (density > water)
+            # They rest on the saucepan bottom, not floating in water
+            # Position food so bottom rests on saucepan bottom (with slight clearance)
+            bottom_clearance = 0.002  # 2mm clearance from saucepan bottom
+            z_bottom = config.saucepan.bottom_thickness + bottom_clearance
+            z_center = z_bottom + food_height * 0.5
 
-            # Ensure top of food doesn't exceed water surface
+            # Verify food is submerged (top should be below water surface)
             food_top_z = z_center + food_height * 0.5
             if food_top_z > water_top_z:
-                # Adjust to keep fully submerged
-                z_center = water_top_z - food_height * 0.5
+                print(f"Warning: {food.name} extends above water surface!")
+                print(f"  Food top: {food_top_z*100:.2f}cm, Water top: {water_top_z*100:.2f}cm")
 
             assembly.add_component(food, position=(x, y, z_center))
 

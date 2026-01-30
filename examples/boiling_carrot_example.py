@@ -31,11 +31,19 @@ def create_saucepan_with_carrot():
     print("Creating Saucepan Geometry")
     print("=" * 60)
 
-    # Step 1: Create configuration
+    # Step 1: Create configuration with realistic carrot properties
     print("\n1. Creating configuration...")
     config = create_standard_saucepan_config()
-    config.num_food_pieces = 3
+
+    # Configure realistic carrot cuts
+    config.num_food_pieces = 5  # Typical portion size
     config.food_type = "carrot"
+    config.food.carrot_cut_type = "round"  # "round" (coins), "stick" (batons), or "chunk"
+
+    print(f"\n   Carrot configuration:")
+    print(f"   - Cut type: {config.food.carrot_cut_type}")
+    print(f"   - Number of pieces: {config.num_food_pieces}")
+    print(f"   - Density: 1075 kg/m³ (will SINK in water)")
 
     # Print configuration summary
     print(config.summary())
@@ -46,9 +54,15 @@ def create_saucepan_with_carrot():
     print(f"   Created assembly: {assembly}")
     print(f"   Components: {list(assembly.components.keys())}")
 
+    # Show physical behavior
+    print(f"\n3. Physical behavior:")
+    print(f"   - Carrots sink due to density > water (1075 vs 1000 kg/m³)")
+    print(f"   - Pieces rest on saucepan bottom")
+    print(f"   - Fully submerged in water")
+
     # Get assembly bounds
     bounds = assembly.get_bounds()
-    print(f"\n3. Assembly bounds:")
+    print(f"\n4. Assembly bounds:")
     print(f"   Min: {bounds[0]}")
     print(f"   Max: {bounds[1]}")
 
@@ -98,10 +112,13 @@ def setup_physics_simulation(assembly):
         ambient_temperature=20.0
     )
 
+    # Count food pieces dynamically
+    num_carrot_pieces = len([c for c in assembly.components.keys() if c.startswith("carrot_piece_")])
+
     # Initialize temperatures
     total_food_points = sum(
         assembly.get_component(f"carrot_piece_{i}").num_internal_points
-        for i in range(3)
+        for i in range(num_carrot_pieces)
     )
 
     heat_model.initialize_temperatures(
